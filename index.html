@@ -468,6 +468,12 @@ async function ask(){
     stats.total++;stats.local++;
     finishAsk(record);
   }else{
+    // 2) AI cache — same query+lang in history, max 30 days old
+    const qNorm=q.toLowerCase().replace(/\s+/g,' ');
+    const cached=history_.find(h=>h.src==='ai'&&h.lang===lang&&
+      h.q.toLowerCase().replace(/\s+/g,' ')===qNorm&&
+      Date.now()-h.ts<2592000000);
+    if(cached){renderResult(cached);askBtn.disabled=false;$('#askLabel').textContent=t.ask;LS.set('stats',stats);return;}
     resultArea.innerHTML=skeleton();
     try{
       const apiBase = location.protocol==='file:' ? 'https://app-six-tawny-91.vercel.app' : '';

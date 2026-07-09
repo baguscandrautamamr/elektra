@@ -3,7 +3,8 @@
 //   Name : GEMINI_API_KEY
 //   Value: <API key kamu dari Google AI Studio>
 
-const MODEL = 'gemini-2.5-flash'; // ganti ke 'gemini-2.5-flash-lite' jika ingin lebih cepat/hemat kuota
+// gemini-2.0-flash: 1500 RPD free tier (vs 250 RPD untuk 2.5-flash)
+const MODEL = 'gemini-2.0-flash';
 
 const SCHEMA = {
   type: 'OBJECT',
