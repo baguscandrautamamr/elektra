@@ -78,7 +78,7 @@ export default async function handler(req, res) {
 
     const data = await r.json();
 
-    const text = data?.content?.[0]?.text?.trim();
+    const text = data?.content?.find(b => b.type === 'text')?.text?.trim();
     if (!text) {
       console.error('Empty response', JSON.stringify(data).slice(0, 200));
       return res.status(502).json({ error: 'empty_response' });
