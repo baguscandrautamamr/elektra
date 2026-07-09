@@ -1,7 +1,1 @@
-{
-  "functions": {
-    "api/ask.js": {
-      "regions": ["sin1"]
-    }
-  }
-}
+{}
