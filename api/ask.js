@@ -1,51 +1,54 @@
-// ELEKTRA — Proxy aman ke Gemini API (Vercel Serverless Function)
+// ELEKTRA — Proxy ke Olagon AI Gateway (Anthropic-compatible)
 // API key TIDAK ditulis di sini. Set di Vercel: Settings → Environment Variables
-//   Name : GEMINI_API_KEY
-//   Value: <API key kamu dari Google AI Studio>
+//   Name : API_KEY
+//   Value: rk_live_...
 
-// gemini-2.0-flash: 1500 RPD free tier (vs 250 RPD untuk 2.5-flash)
-const MODEL = 'gemini-2.0-flash';
+const MODEL = 'claude-sonnet-4-6';
+const BASE_URL = 'https://gateway.olagon.site/anthropic/v1/messages';
 
-const SCHEMA = {
-  type: 'OBJECT',
-  properties: {
-    puil: {
-      type: 'OBJECT',
-      properties: {
-        summary: { type: 'STRING' },
-        points: { type: 'ARRAY', items: { type: 'STRING' } },
-        refs: { type: 'ARRAY', items: { type: 'STRING' } },
+const TOOL = {
+  name: 'electrical_reference',
+  description: 'Return structured electrical standards comparison for PUIL/SNI, IEC, and NEC/NFPA.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      puil: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string' },
+          points:  { type: 'array', items: { type: 'string' } },
+          refs:    { type: 'array', items: { type: 'string' } },
+        },
+        required: ['summary', 'points', 'refs'],
       },
-      required: ['summary', 'points', 'refs'],
-    },
-    iec: {
-      type: 'OBJECT',
-      properties: {
-        summary: { type: 'STRING' },
-        points: { type: 'ARRAY', items: { type: 'STRING' } },
-        refs: { type: 'ARRAY', items: { type: 'STRING' } },
+      iec: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string' },
+          points:  { type: 'array', items: { type: 'string' } },
+          refs:    { type: 'array', items: { type: 'string' } },
+        },
+        required: ['summary', 'points', 'refs'],
       },
-      required: ['summary', 'points', 'refs'],
-    },
-    nec: {
-      type: 'OBJECT',
-      properties: {
-        summary: { type: 'STRING' },
-        points: { type: 'ARRAY', items: { type: 'STRING' } },
-        refs: { type: 'ARRAY', items: { type: 'STRING' } },
+      nec: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string' },
+          points:  { type: 'array', items: { type: 'string' } },
+          refs:    { type: 'array', items: { type: 'string' } },
+        },
+        required: ['summary', 'points', 'refs'],
       },
-      required: ['summary', 'points', 'refs'],
+      verdict: { type: 'string' },
     },
-    verdict: { type: 'STRING' },
+    required: ['puil', 'iec', 'nec', 'verdict'],
   },
-  required: ['puil', 'iec', 'nec', 'verdict'],
 };
 
 function systemPrompt(lang) {
-  const langLine =
-    lang === 'en'
-      ? 'Answer entirely in English.'
-      : 'Jawab sepenuhnya dalam Bahasa Indonesia.';
+  const langLine = lang === 'en'
+    ? 'Answer entirely in English.'
+    : 'Jawab sepenuhnya dalam Bahasa Indonesia.';
   return `You are an electrical standards reference assistant for MEP engineers in Indonesia.
 For the user's electrical question, compare how it is addressed by three bodies of standards:
 1. "puil"  = PUIL 2011 / SNI (Indonesian national standards)
@@ -62,25 +65,23 @@ Rules:
 - Be conservative: if standards differ, say so explicitly rather than forcing agreement.`;
 }
 
-async function callGemini(key, lang, query) {
-  const r = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: systemPrompt(lang) }] },
-        contents: [{ role: 'user', parts: [{ text: query }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: SCHEMA,
-          temperature: 0.3,
-          maxOutputTokens: 4096,
-        },
-      }),
-    }
-  );
-  return r;
+async function callClaude(key, lang, query) {
+  return fetch(BASE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 4096,
+      system: systemPrompt(lang),
+      messages: [{ role: 'user', content: query }],
+      tools: [TOOL],
+      tool_choice: { type: 'tool', name: 'electrical_reference' },
+    }),
+  });
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -90,7 +91,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'method_not_allowed' });
   }
 
-  const key = process.env.GEMINI_API_KEY;
+  const key = process.env.API_KEY;
   if (!key) {
     return res.status(500).json({ error: 'no_key' });
   }
@@ -101,46 +102,37 @@ export default async function handler(req, res) {
   }
 
   try {
-    let r = await callGemini(key, lang, query);
+    let r = await callClaude(key, lang, query);
 
-    // Retry once on 503 (model overloaded)
-    if (r.status === 503) {
+    // Retry once on 529/503 (overloaded)
+    if (r.status === 529 || r.status === 503) {
       await sleep(2500);
-      r = await callGemini(key, lang, query);
+      r = await callClaude(key, lang, query);
     }
 
     if (r.status === 429) {
-      const body429 = await r.json().catch(() => ({}));
-      const isDaily = JSON.stringify(body429).toLowerCase().includes('daily') ||
-                      JSON.stringify(body429).toLowerCase().includes('quota');
-      return res.status(429).json({ error: isDaily ? 'quota_exceeded' : 'rate_limited' });
+      return res.status(429).json({ error: 'rate_limited' });
     }
-    if (r.status === 503) {
+    if (r.status === 529 || r.status === 503) {
       return res.status(503).json({ error: 'model_busy' });
     }
     if (!r.ok) {
       const detail = await r.text().catch(() => '');
-      console.error('Gemini error', r.status, detail.slice(0, 300));
+      console.error('API error', r.status, detail.slice(0, 300));
       return res.status(502).json({ error: 'upstream_error' });
     }
 
     const data = await r.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) {
+
+    // Extract tool_use result (structured output)
+    const toolBlock = data?.content?.find(b => b.type === 'tool_use');
+    if (!toolBlock?.input) {
+      console.error('No tool_use block in response', JSON.stringify(data).slice(0, 200));
       return res.status(502).json({ error: 'empty_response' });
     }
 
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      console.error('parse_error | finishReason:', data?.candidates?.[0]?.finishReason, '| textLen:', text.length);
-      return res.status(502).json({ error: 'parse_error' });
-    }
-
-    // Cache identik query selama 1 jam di edge (hemat kuota)
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate');
-    return res.status(200).json(parsed);
+    return res.status(200).json(toolBlock.input);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'server_error' });
