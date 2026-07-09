@@ -3,7 +3,7 @@
 //   Name : API_KEY
 //   Value: rk_live_...
 
-const MODEL = 'claude-sonnet-4-6';
+const MODEL = 'claude-haiku-4-5';
 const BASE_URL = 'https://gateway.olagon.site/anthropic/v1/messages';
 
 const TOOL = {
@@ -75,7 +75,7 @@ async function callClaude(key, lang, query) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 4096,
+      max_tokens: 2048,
       system: systemPrompt(lang),
       messages: [{ role: 'user', content: query }],
       tools: [TOOL],
