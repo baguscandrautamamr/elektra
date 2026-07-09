@@ -468,7 +468,8 @@ async function ask(){
   }else{
     resultArea.innerHTML=skeleton();
     try{
-      const r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},
+      const apiBase = location.protocol==='file:' ? 'https://app-six-tawny-91.vercel.app' : '';
+      const r=await fetch(apiBase+'/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({query:q,lang})});
       const j=await r.json();
       if(!r.ok){
