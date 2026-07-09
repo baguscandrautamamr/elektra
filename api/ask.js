@@ -3,7 +3,7 @@
 //   Name : API_KEY
 //   Value: rk_live_...
 
-const MODEL = 'claude-haiku-4-5';
+const MODEL = 'claude-3-5-haiku';
 const BASE_URL = 'https://gateway.olagon.site/anthropic/v1/messages';
 
 
