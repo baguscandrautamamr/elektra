@@ -299,7 +299,8 @@ const T = {
     histCleared:'Riwayat dihapus',confirmClear:'Hapus semua riwayat konsultasi?',
     errNet:'Gagal terhubung ke server AI. Periksa koneksi atau coba lagi.',
     errKey:'Server belum dikonfigurasi (GEMINI_API_KEY belum diisi di Vercel).',
-    errQuota:'Kuota harian Gemini habis. Coba lagi besok, atau gunakan topik dari knowledge base lokal.',
+    errQuota:'Kuota harian Gemini habis. Coba lagi besok atau tambahkan billing di Google AI Studio.',
+    errRate:'Terlalu banyak permintaan. Tunggu 30 detik lalu coba lagi.',
     errBusy:'Model AI sedang sibuk, coba lagi dalam beberapa detik.',
     chips:['Grounding Proteksi Petir','KHA Kabel Motor','Stop Kontak Kamar Mandi']},
   en:{tagline:'Electrical Standards Reference',qLabel:'Electrical Issue Query',
@@ -319,7 +320,8 @@ const T = {
     histCleared:'History cleared',confirmClear:'Delete all consultation history?',
     errNet:'Failed to reach AI server. Check connection and retry.',
     errKey:'Server not configured (GEMINI_API_KEY missing on Vercel).',
-    errQuota:'Daily Gemini quota exhausted. Try again tomorrow, or use local knowledge base topics.',
+    errQuota:'Daily Gemini quota exhausted. Try again tomorrow or add billing in Google AI Studio.',
+    errRate:'Too many requests. Wait 30 seconds and try again.',
     errBusy:'AI model is busy, please try again in a few seconds.',
     chips:['Lightning Protection Grounding','Motor Cable Ampacity','Bathroom Receptacle']}
 };
@@ -473,7 +475,11 @@ async function ask(){
         body:JSON.stringify({query:q,lang})});
       const j=await r.json();
       if(!r.ok){
-        const msg = r.status===500&&j.error==='no_key' ? t.errKey : r.status===429 ? t.errQuota : r.status===503 ? t.errBusy : (j.error||t.errNet);
+        const msg = r.status===500&&j.error==='no_key' ? t.errKey
+          : r.status===429&&j.error==='rate_limited' ? t.errRate
+          : r.status===429 ? t.errQuota
+          : r.status===503 ? t.errBusy
+          : (j.error||t.errNet);
         throw new Error(msg);
       }
       record={id:genId(),ts:Date.now(),q,src:'ai',ms:Math.round(performance.now()-t0),lang,ans:j};

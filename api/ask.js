@@ -109,7 +109,10 @@ export default async function handler(req, res) {
     }
 
     if (r.status === 429) {
-      return res.status(429).json({ error: 'quota_exceeded' });
+      const body429 = await r.json().catch(() => ({}));
+      const isDaily = JSON.stringify(body429).toLowerCase().includes('daily') ||
+                      JSON.stringify(body429).toLowerCase().includes('quota');
+      return res.status(429).json({ error: isDaily ? 'quota_exceeded' : 'rate_limited' });
     }
     if (r.status === 503) {
       return res.status(503).json({ error: 'model_busy' });
