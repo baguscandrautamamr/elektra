@@ -114,6 +114,8 @@ export default async function handler(req, res) {
     try {
       parsed = JSON.parse(text);
     } catch {
+      const reason = data?.candidates?.[0]?.finishReason ?? 'unknown';
+      console.error('parse_error | finishReason:', reason, '| textLen:', text.length, '| textStart:', text.slice(0, 120));
       return res.status(502).json({ error: 'parse_error' });
     }
 
