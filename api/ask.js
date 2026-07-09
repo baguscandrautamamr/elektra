@@ -61,6 +61,29 @@ Rules:
 - Be conservative: if standards differ, say so explicitly rather than forcing agreement.`;
 }
 
+async function callGemini(key, lang, query) {
+  const r = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemPrompt(lang) }] },
+        contents: [{ role: 'user', parts: [{ text: query }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: SCHEMA,
+          temperature: 0.3,
+          maxOutputTokens: 4096,
+        },
+      }),
+    }
+  );
+  return r;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'method_not_allowed' });
@@ -77,26 +100,19 @@ export default async function handler(req, res) {
   }
 
   try {
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt(lang) }] },
-          contents: [{ role: 'user', parts: [{ text: query }] }],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            responseSchema: SCHEMA,
-            temperature: 0.3,
-            maxOutputTokens: 2048,
-          },
-        }),
-      }
-    );
+    let r = await callGemini(key, lang, query);
+
+    // Retry once on 503 (model overloaded)
+    if (r.status === 503) {
+      await sleep(2500);
+      r = await callGemini(key, lang, query);
+    }
 
     if (r.status === 429) {
       return res.status(429).json({ error: 'quota_exceeded' });
+    }
+    if (r.status === 503) {
+      return res.status(503).json({ error: 'model_busy' });
     }
     if (!r.ok) {
       const detail = await r.text().catch(() => '');
@@ -114,8 +130,7 @@ export default async function handler(req, res) {
     try {
       parsed = JSON.parse(text);
     } catch {
-      const reason = data?.candidates?.[0]?.finishReason ?? 'unknown';
-      console.error('parse_error | finishReason:', reason, '| textLen:', text.length, '| textStart:', text.slice(0, 120));
+      console.error('parse_error | finishReason:', data?.candidates?.[0]?.finishReason, '| textLen:', text.length);
       return res.status(502).json({ error: 'parse_error' });
     }
 
