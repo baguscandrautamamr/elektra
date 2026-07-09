@@ -6,63 +6,19 @@
 const MODEL = 'claude-haiku-4-5';
 const BASE_URL = 'https://gateway.olagon.site/anthropic/v1/messages';
 
-const TOOL = {
-  name: 'electrical_reference',
-  description: 'Return structured electrical standards comparison for PUIL/SNI, IEC, and NEC/NFPA.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      puil: {
-        type: 'object',
-        properties: {
-          summary: { type: 'string' },
-          points:  { type: 'array', items: { type: 'string' } },
-          refs:    { type: 'array', items: { type: 'string' } },
-        },
-        required: ['summary', 'points', 'refs'],
-      },
-      iec: {
-        type: 'object',
-        properties: {
-          summary: { type: 'string' },
-          points:  { type: 'array', items: { type: 'string' } },
-          refs:    { type: 'array', items: { type: 'string' } },
-        },
-        required: ['summary', 'points', 'refs'],
-      },
-      nec: {
-        type: 'object',
-        properties: {
-          summary: { type: 'string' },
-          points:  { type: 'array', items: { type: 'string' } },
-          refs:    { type: 'array', items: { type: 'string' } },
-        },
-        required: ['summary', 'points', 'refs'],
-      },
-      verdict: { type: 'string' },
-    },
-    required: ['puil', 'iec', 'nec', 'verdict'],
-  },
-};
 
 function systemPrompt(lang) {
-  const langLine = lang === 'en'
-    ? 'Answer entirely in English.'
-    : 'Jawab sepenuhnya dalam Bahasa Indonesia.';
-  return `You are an electrical standards reference assistant for MEP engineers in Indonesia.
-For the user's electrical question, compare how it is addressed by three bodies of standards:
-1. "puil"  = PUIL 2011 / SNI (Indonesian national standards)
-2. "iec"   = IEC international standards
-3. "nec"   = NEC / NFPA (United States)
+  const langLine = lang === 'en' ? 'Answer entirely in English.' : 'Jawab sepenuhnya dalam Bahasa Indonesia.';
+  return `You are an electrical standards reference assistant for MEP engineers in Indonesia. ${langLine}
+
+Respond with ONLY a raw JSON object — no markdown, no explanation, no code fences. Schema:
+{"puil":{"summary":"string","points":["string"],"refs":["string"]},"iec":{"summary":"string","points":["string"],"refs":["string"]},"nec":{"summary":"string","points":["string"],"refs":["string"]},"verdict":"string"}
 
 Rules:
-- ${langLine}
-- "summary": 2-3 concise sentences on how that standard treats the topic.
-- "points": 2-4 short practical field notes (each one sentence).
-- "refs": specific article/clause codes you are confident about (e.g. "SNI 0225:2011", "IEC 60364-5-52", "NFPA 70 250.53"). If unsure of an exact clause number, give only the standard code without the clause. NEVER invent clause numbers.
-- "verdict": one short practical conclusion for field work in Indonesia (2-3 sentences).
-- If the question is NOT about electrical/MEP topics, still fill the schema but state in each summary that the topic is outside electrical standards scope.
-- Be conservative: if standards differ, say so explicitly rather than forcing agreement.`;
+- summary: 2-3 concise sentences per standard.
+- points: 2-3 short practical field notes.
+- refs: only codes you are confident about (e.g. "SNI 0225:2011", "IEC 60364-5-52", "NFPA 70 250.53"). NEVER invent clause numbers.
+- verdict: 1-2 sentence practical conclusion for field work in Indonesia.`;
 }
 
 async function callClaude(key, lang, query) {
@@ -78,8 +34,6 @@ async function callClaude(key, lang, query) {
       max_tokens: 2048,
       system: systemPrompt(lang),
       messages: [{ role: 'user', content: query }],
-      tools: [TOOL],
-      tool_choice: { type: 'tool', name: 'electrical_reference' },
     }),
   });
 }
@@ -124,15 +78,24 @@ export default async function handler(req, res) {
 
     const data = await r.json();
 
-    // Extract tool_use result (structured output)
-    const toolBlock = data?.content?.find(b => b.type === 'tool_use');
-    if (!toolBlock?.input) {
-      console.error('No tool_use block in response', JSON.stringify(data).slice(0, 200));
+    const text = data?.content?.[0]?.text?.trim();
+    if (!text) {
+      console.error('Empty response', JSON.stringify(data).slice(0, 200));
       return res.status(502).json({ error: 'empty_response' });
     }
 
+    let parsed;
+    try {
+      // Strip accidental markdown fences if present
+      const clean = text.replace(/^```(?:json)?\n?/,'').replace(/\n?```$/,'');
+      parsed = JSON.parse(clean);
+    } catch {
+      console.error('parse_error | text:', text.slice(0, 150));
+      return res.status(502).json({ error: 'parse_error' });
+    }
+
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate');
-    return res.status(200).json(toolBlock.input);
+    return res.status(200).json(parsed);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'server_error' });
