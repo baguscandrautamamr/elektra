@@ -1,0 +1,25 @@
+{
+  "name": "ELEKTRA — Standar Kelistrikan",
+  "short_name": "ELEKTRA",
+  "description": "Referensi standar kelistrikan PUIL/SNI · IEC · NEC untuk engineer MEP",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0D1117",
+  "theme_color": "#D98E4A",
+  "lang": "id",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
