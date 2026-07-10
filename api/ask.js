@@ -1,127 +1,98 @@
-// ELEKTRA — Proxy aman ke Gemini API (Vercel Serverless Function)
-// API key TIDAK ditulis di sini. Set di Vercel: Settings → Environment Variables
-//   Name : GEMINI_API_KEY
-//   Value: <API key kamu dari Google AI Studio>
+// ELEKTRA — Edge Function (runs at CDN closest to user, e.g. Singapore for Indonesia)
+// API key set di Vercel: Settings → Environment Variables → API_KEY
 
-const MODEL = 'gemini-2.5-flash'; // ganti ke 'gemini-2.5-flash-lite' jika ingin lebih cepat/hemat kuota
+export const config = { runtime: 'edge' };
 
-const SCHEMA = {
-  type: 'OBJECT',
-  properties: {
-    puil: {
-      type: 'OBJECT',
-      properties: {
-        summary: { type: 'STRING' },
-        points: { type: 'ARRAY', items: { type: 'STRING' } },
-        refs: { type: 'ARRAY', items: { type: 'STRING' } },
-      },
-      required: ['summary', 'points', 'refs'],
-    },
-    iec: {
-      type: 'OBJECT',
-      properties: {
-        summary: { type: 'STRING' },
-        points: { type: 'ARRAY', items: { type: 'STRING' } },
-        refs: { type: 'ARRAY', items: { type: 'STRING' } },
-      },
-      required: ['summary', 'points', 'refs'],
-    },
-    nec: {
-      type: 'OBJECT',
-      properties: {
-        summary: { type: 'STRING' },
-        points: { type: 'ARRAY', items: { type: 'STRING' } },
-        refs: { type: 'ARRAY', items: { type: 'STRING' } },
-      },
-      required: ['summary', 'points', 'refs'],
-    },
-    verdict: { type: 'STRING' },
-  },
-  required: ['puil', 'iec', 'nec', 'verdict'],
-};
+const MODEL = 'claude-3-5-haiku';
+const BASE_URL = 'https://gateway.olagon.site/anthropic/v1/messages';
 
 function systemPrompt(lang) {
-  const langLine =
-    lang === 'en'
-      ? 'Answer entirely in English.'
-      : 'Jawab sepenuhnya dalam Bahasa Indonesia.';
-  return `You are an electrical standards reference assistant for MEP engineers in Indonesia.
-For the user's electrical question, compare how it is addressed by three bodies of standards:
-1. "puil"  = PUIL 2011 / SNI (Indonesian national standards)
-2. "iec"   = IEC international standards
-3. "nec"   = NEC / NFPA (United States)
+  const langLine = lang === 'en' ? 'Answer entirely in English.' : 'Jawab sepenuhnya dalam Bahasa Indonesia.';
+  return `You are an electrical standards reference assistant for MEP engineers in Indonesia. ${langLine}
+
+Respond with ONLY a raw JSON object — no markdown, no explanation, no code fences. Schema:
+{"puil":{"summary":"string","points":["string"],"refs":["string"]},"iec":{"summary":"string","points":["string"],"refs":["string"]},"nec":{"summary":"string","points":["string"],"refs":["string"]},"verdict":"string"}
 
 Rules:
-- ${langLine}
-- "summary": 2-3 concise sentences on how that standard treats the topic.
-- "points": 2-4 short practical field notes (each one sentence).
-- "refs": specific article/clause codes you are confident about (e.g. "SNI 0225:2011", "IEC 60364-5-52", "NFPA 70 250.53"). If unsure of an exact clause number, give only the standard code without the clause. NEVER invent clause numbers.
-- "verdict": one short practical conclusion for field work in Indonesia (2-3 sentences).
-- If the question is NOT about electrical/MEP topics, still fill the schema but state in each summary that the topic is outside electrical standards scope.
-- Be conservative: if standards differ, say so explicitly rather than forcing agreement.`;
+- summary: 2-3 concise sentences per standard.
+- points: 2-3 short practical field notes.
+- refs: only codes you are confident about (e.g. "SNI 0225:2011", "IEC 60364-5-52", "NFPA 70 250.53"). NEVER invent clause numbers.
+- verdict: 1-2 sentence practical conclusion for field work in Indonesia.`;
 }
 
-export default async function handler(req, res) {
+function json(data, status = 200, extra = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...extra },
+  });
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function callClaude(key, lang, query) {
+  return fetch(BASE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 2048,
+      system: systemPrompt(lang),
+      messages: [{ role: 'user', content: query }],
+    }),
+  });
+}
+
+export default async function handler(req) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'method_not_allowed' });
+    return json({ error: 'method_not_allowed' }, 405);
   }
 
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) {
-    return res.status(500).json({ error: 'no_key' });
-  }
+  const key = process.env.API_KEY;
+  if (!key) return json({ error: 'no_key' }, 500);
 
-  const { query, lang } = req.body || {};
+  let body;
+  try { body = await req.json(); } catch { return json({ error: 'invalid_query' }, 400); }
+
+  const { query, lang } = body;
   if (!query || typeof query !== 'string' || query.length > 2000) {
-    return res.status(400).json({ error: 'invalid_query' });
+    return json({ error: 'invalid_query' }, 400);
   }
 
   try {
-    const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt(lang) }] },
-          contents: [{ role: 'user', parts: [{ text: query }] }],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            responseSchema: SCHEMA,
-            temperature: 0.3,
-            maxOutputTokens: 2048,
-          },
-        }),
-      }
-    );
+    let r = await callClaude(key, lang, query);
 
-    if (r.status === 429) {
-      return res.status(429).json({ error: 'quota_exceeded' });
+    if (r.status === 529 || r.status === 503) {
+      await sleep(2500);
+      r = await callClaude(key, lang, query);
     }
+
+    if (r.status === 429) return json({ error: 'rate_limited' }, 429);
+    if (r.status === 529 || r.status === 503) return json({ error: 'model_busy' }, 503);
     if (!r.ok) {
       const detail = await r.text().catch(() => '');
-      console.error('Gemini error', r.status, detail.slice(0, 300));
-      return res.status(502).json({ error: 'upstream_error' });
+      console.error('API error', r.status, detail.slice(0, 200));
+      return json({ error: 'upstream_error' }, 502);
     }
 
     const data = await r.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) {
-      return res.status(502).json({ error: 'empty_response' });
-    }
+    const text = data?.content?.find(b => b.type === 'text')?.text?.trim();
+    if (!text) return json({ error: 'empty_response' }, 502);
 
     let parsed;
     try {
-      parsed = JSON.parse(text);
+      const clean = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+      parsed = JSON.parse(clean);
     } catch {
-      return res.status(502).json({ error: 'parse_error' });
+      return json({ error: 'parse_error' }, 502);
     }
 
-    // Cache identik query selama 1 jam di edge (hemat kuota)
-    res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate');
-    return res.status(200).json(parsed);
+    return json(parsed, 200, { 'Cache-Control': 's-maxage=3600, stale-while-revalidate' });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: 'server_error' });
+    return json({ error: 'server_error' }, 500);
   }
 }

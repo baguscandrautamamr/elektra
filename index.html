@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0D1117">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ELEKTRA">
 <title>ELEKTRA — Standar Kelistrikan</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -299,7 +304,9 @@ const T = {
     histCleared:'Riwayat dihapus',confirmClear:'Hapus semua riwayat konsultasi?',
     errNet:'Gagal terhubung ke server AI. Periksa koneksi atau coba lagi.',
     errKey:'Server belum dikonfigurasi (GEMINI_API_KEY belum diisi di Vercel).',
-    errQuota:'Kuota harian Gemini habis. Coba lagi besok, atau gunakan topik dari knowledge base lokal.',
+    errQuota:'Kuota harian Gemini habis. Coba lagi besok atau tambahkan billing di Google AI Studio.',
+    errRate:'Terlalu banyak permintaan. Tunggu 30 detik lalu coba lagi.',
+    errBusy:'Model AI sedang sibuk, coba lagi dalam beberapa detik.',
     chips:['Grounding Proteksi Petir','KHA Kabel Motor','Stop Kontak Kamar Mandi']},
   en:{tagline:'Electrical Standards Reference',qLabel:'Electrical Issue Query',
     ph:'Example: what is the maximum grounding resistance for lightning protection?',
@@ -318,7 +325,9 @@ const T = {
     histCleared:'History cleared',confirmClear:'Delete all consultation history?',
     errNet:'Failed to reach AI server. Check connection and retry.',
     errKey:'Server not configured (GEMINI_API_KEY missing on Vercel).',
-    errQuota:'Daily Gemini quota exhausted. Try again tomorrow, or use local knowledge base topics.',
+    errQuota:'Daily Gemini quota exhausted. Try again tomorrow or add billing in Google AI Studio.',
+    errRate:'Too many requests. Wait 30 seconds and try again.',
+    errBusy:'AI model is busy, please try again in a few seconds.',
     chips:['Lightning Protection Grounding','Motor Cable Ampacity','Bathroom Receptacle']}
 };
 
@@ -464,13 +473,24 @@ async function ask(){
     stats.total++;stats.local++;
     finishAsk(record);
   }else{
+    // 2) AI cache — same query+lang in history, max 30 days old
+    const qNorm=q.toLowerCase().replace(/\s+/g,' ');
+    const cached=history_.find(h=>h.src==='ai'&&h.lang===lang&&
+      h.q.toLowerCase().replace(/\s+/g,' ')===qNorm&&
+      Date.now()-h.ts<2592000000);
+    if(cached){renderResult(cached);askBtn.disabled=false;$('#askLabel').textContent=t.ask;LS.set('stats',stats);return;}
     resultArea.innerHTML=skeleton();
     try{
-      const r=await fetch('/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},
+      const apiBase = location.protocol==='file:' ? 'https://app-six-tawny-91.vercel.app' : '';
+      const r=await fetch(apiBase+'/api/ask',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({query:q,lang})});
       const j=await r.json();
       if(!r.ok){
-        const msg = r.status===500&&j.error==='no_key' ? t.errKey : r.status===429 ? t.errQuota : (j.error||t.errNet);
+        const msg = r.status===500&&j.error==='no_key' ? t.errKey
+          : r.status===429&&j.error==='rate_limited' ? t.errRate
+          : r.status===429 ? t.errQuota
+          : r.status===503 ? t.errBusy
+          : (j.error||t.errNet);
         throw new Error(msg);
       }
       record={id:genId(),ts:Date.now(),q,src:'ai',ms:Math.round(performance.now()-t0),lang,ans:j};
@@ -612,6 +632,10 @@ $('#lockBtn').onclick=()=>{adminOpen=false;renderAdmin()};
 
 /* ================= INIT ================= */
 applyTheme();applyLang();renderPinpad();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js'));
+}
 </script>
 </body>
 </html>
